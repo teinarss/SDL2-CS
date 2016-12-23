@@ -4,10 +4,7 @@
 # Source Lists
 SRC = \
 	src/LPUtf8StrMarshaler.cs \
-	src/SDL2.cs \
-	src/SDL2_image.cs \
-	src/SDL2_mixer.cs \
-	src/SDL2_ttf.cs
+	src/SDL2.cs
 
 # Targets
 
