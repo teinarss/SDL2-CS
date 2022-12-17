@@ -1,0 +1,117 @@
+name: Build and publish
+
+on: 
+  workflow_dispatch:
+    inputs:
+      nugetPackageVersion:
+        description: 'nuget package version'     
+        required: true
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-11
+    steps:
+      - name: SDL2
+        env:
+          SDL2_VERSION: 2.26.1
+        run: |
+          mkdir -p artifacts/x86_64
+          mkdir artifacts/arm64
+          curl -s -L -O http://www.libsdl.org/release/SDL2-${SDL2_VERSION}.tar.gz
+          tar xf SDL2-${SDL2_VERSION}.tar.gz
+          mkdir SDL2-${SDL2_VERSION}/build
+          cd SDL2-${SDL2_VERSION}/build
+          CC=../build-scripts/clang-fat.sh ../configure --without-x --disable-jack --disable-static --prefix "${PWD}"
+          make
+          make install
+          lipo -thin arm64 lib/libSDL2-2.0.0.dylib -output ../../artifacts/arm64/SDL2.dylib
+          lipo -thin x86_64 lib/libSDL2-2.0.0.dylib -output ../../artifacts/x86_64/SDL2.dylib
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macOS
+          path: artifacts
+  windows:
+    name: Windows
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Fetch Windows dll
+        env:
+          SDL2_VERSION: 2.26.1
+        run: |
+          mkdir -p artifacts/win-x64
+          mkdir artifacts/win-x86
+          curl -s -L -O https://libsdl.org/release/SDL2-${SDL2_VERSION}-win32-x64.zip
+          curl -s -L -O https://libsdl.org/release/SDL2-${SDL2_VERSION}-win32-x86.zip
+          ls
+          unzip SDL2-${SDL2_VERSION}-win32-x64.zip -d artifacts/win-x64
+          unzip SDL2-${SDL2_VERSION}-win32-x86.zip -d artifacts/win-x86
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: Windows
+          path: artifacts
+  linux:
+    name: Linux
+    runs-on: ubuntu-20.04
+    container: centos:centos7
+    steps:
+      - name: Install Dependencies
+        run: yum -y install libXext-devel libX11-devel wayland-devel libGL-devel libGLU-devel libXrender-devel libXrandr-devel libXcursor-devel libXinerama-devel libXi-devel libXScrnSaver-devel gettext-devel make gcc
+      - name: Build Linux so
+        env:
+          SDL2_VERSION: 2.26.1
+        run: |
+          curl -s -L -O http://www.libsdl.org/release/SDL2-${SDL2_VERSION}.tar.gz
+          tar xf SDL2-${SDL2_VERSION}.tar.gz
+          cd SDL2-${SDL2_VERSION}
+          ./configure --disable-rpath --enable-sdl-dlopen --disable-loadso --disable-audio --disable-sensor --enable-x11-shared --enable-video-wayland --disable-video-directfb --disable-video-vulkan --disable-video-dummy --disable-power --disable-joystick --disable-haptic --disable-filesystem --disable-file --disable-cpuinfo --prefix "${PWD}/.."
+          make
+          make install
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: Linux
+          path: lib/libSDL2.so
+  build_publish:
+    name: Linux (.NET 6.0)
+    needs: [macos, windows, Linux]
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Clone Repository
+        uses: actions/checkout@v3
+      - name: Download all native lib artifacts
+        uses: actions/download-artifact@v3
+      - name: rename files
+        run: |
+          
+          mkdir -p native/osx-x64
+          mv macOS/x86_64/SDL2.dylib native/osx-x64/SDL2.dylib
+
+          mv Windows/win-x64/SDL2.dll native/win-x64/SDL2.dll
+
+          mv Windows/win-x86/SDL2.dll native/win-x86/SDL2.dll
+
+          mkdir native/linux-x64
+          mv Linux/libSDL2.so native/linux-x64/SDL2.so
+          ls -R
+
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Install .NET 6.0
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'
+          
+      - name: Build
+        run: dotnet build SDL2-CS.sln --configuration Release
+
+      - name: nuget pack
+        run:  nuget pack OpenRA-SDL2-CS.nuspec -version ${{ github.event.inputs.nugetPackageVersion }}
+
+      # - name: nuget Publish
+      #   run: nuget push **\*.nupkg -Source 'https://api.nuget.org/v3/index.json' -ApiKey ${{secrets.NUGET_API_KEY}}
